@@ -4,9 +4,42 @@ import cv2
 import math
 import argparse
 import numpy as np
+import datetime
 from HowCuteAmI.howcuteami import highlightFace, scale, cropImage
 import base64
 from flask_cors import CORS
+from sqlalchemy import create_engine, text
+from dotenv import load_dotenv
+from sqlalchemy_utils import database_exists, create_database
+from sqlalchemy import MetaData, Table, Column, Integer, String, Text, DateTime, inspect, insert, Float
+from sqlalchemy.sql import func
+from sqlalchemy.types import TIMESTAMP
+from sqlalchemy.orm import Session
+
+
+load_dotenv()
+import os
+
+engine = create_engine(os.environ.get('DATABASE_URI'))
+if not database_exists(engine.url):
+    create_database(engine.url)
+
+print(database_exists(engine.url))
+
+if not inspect(engine).has_table("image"):
+    print("Engine has detected that image table doesn't exist")
+    print("Creating image table")
+    metadata_obj = MetaData()
+    image_table = Table('image', 
+                    metadata_obj,
+                    Column("image_id", Integer, primary_key=True),
+                    Column("data", Text),
+                    Column("score", Float),
+                    Column("datetime", DateTime, default=func.now()))
+    metadata_obj.create_all(engine)
+print("Image table exists")
+metadata_obj = MetaData(bind=engine)
+image_table = Table('image', metadata_obj, autoload = True)
 
 def readb64(encoded_data):
 #    encoded_data = uri.split(',')[1]
@@ -60,12 +93,32 @@ CORS(app)
 def hello_world():
     print("trying")
 
-@app.route("/images", methods = ['POST'])
+@app.route("/images", methods = ['GET','POST'])
 def images():
     if request.method == 'POST':
         # print("Request", request.json.keys())
+        t = request.json['data']
         frame = readb64(request.json['data'])
         scores = evaluate(frame)
         print(scores)
+        if (len(scores) == 0):
+            return jsonify({'scores': scores})
+        # stmt = (insert(image_table).values(data=request.json['data']))
+        query = image_table.insert().values(data=t, score= sum(scores) / len(scores))
+        my_session = Session(engine)
+        my_session.execute(query)
+        my_session.commit()
+        my_session.close()
+        print("Inserted data point")
         return jsonify({'scores': scores})
+    elif request.method == 'GET':
+        print("Hit Get")
+        session = Session(engine)
+        query = session.query(image_table)
+        results = query.all()
+        results = [tuple(row) for row in results]
+        # for row in results:
+        #     print(row)
+        return jsonify(results)
+    
         
